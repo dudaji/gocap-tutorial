@@ -1,0 +1,88 @@
+apiVersion: kubeflow.org/v1beta1
+kind: Experiment
+metadata:
+  name: fashion-mnist-tuner
+  namespace: cap-dev
+spec:
+  parameters:
+    - name: node_amount
+      parameterType: categorical
+      feasibleSpace:
+        list:
+          - '64'
+          - '128'
+          - '256'
+          - '512'
+    - name: dropout_rate
+      parameterType: double
+      feasibleSpace:
+        max: '0.9'
+        min: '0.1'
+        step: '0.1'
+    - name: optimizer
+      parameterType: categorical
+      feasibleSpace:
+        list:
+          - sgd
+          - adam
+          - nadam
+          - rmsprop
+  objective:
+    type: maximize
+    goal: 0.99
+    objectiveMetricName: Validation-accuracy
+    additionalMetricNames:
+      - accuracy
+      - loss
+      - Validation-loss
+    metricStrategies:
+      - name: Validation-accuracy
+        value: max
+      - name: accuracy
+        value: max
+      - name: loss
+        value: min
+      - name: Validation-loss
+        value: min
+  algorithm:
+    algorithmName: random
+  trialTemplate:
+    trialSpec:
+      apiVersion: batch/v1
+      kind: Job
+      spec:
+        template:
+          metadata:
+            annotations:
+              sidecar.istio.io/inject: 'false'
+          spec:
+            containers:
+              - command:
+                  - python
+                  - /app/fashion_mnist_tuner.py
+                  - '--node_amount=${trialParameters.node_amount}'
+                  - '--optimizer=${trialParameters.optimizer}'
+                  - '--dropout_rate=${trialParameters.dropout_rate}'
+                  - '--epoch=${trialParameters.epoch}'
+                image: yourID/fashion-mnist-tuner:yourTAG # 자신의 fairing 이미지
+                name: training-container
+            restartPolicy: Never
+    trialParameters:
+      - name: node_amount
+        reference: node_amount
+      - name: dropout_rate
+        reference: dropout_rate
+      - name: optimizer
+        reference: optimizer
+      - name: epoch
+        reference: epoch
+    primaryContainerName: training-container
+    successCondition: status.conditions.#(type=="Complete")#|#(status=="True")#
+    failureCondition: status.conditions.#(type=="Failed")#|#(status=="True")#
+  parallelTrialCount: 3
+  maxTrialCount: 12
+  maxFailedTrialCount: 3
+  metricsCollectorSpec:
+    collector:
+      kind: StdOut
+  resumePolicy: LongRunning
